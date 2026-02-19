@@ -42,9 +42,11 @@ jobs:
 
       - name: Get ALB URL for frontend build
         run: |
+          ALB_NAME="devops-assignment-${ENVIRONMENT}-alb"
           ALB_URL=$(aws elbv2 describe-load-balancers \
+            --names "${ALB_NAME}" \
             --region $AWS_REGION \
-            --query "LoadBalancers[?contains(LoadBalancerName, '${ENVIRONMENT}')].DNSName" \
+            --query "LoadBalancers[0].DNSName" \
             --output text)
           echo "ALB_URL=http://${ALB_URL}" >> $GITHUB_ENV
           echo "ALB URL: ${ALB_URL}"
@@ -109,9 +111,11 @@ jobs:
 
       - name: Health check
         run: |
+          ALB_NAME="devops-assignment-${ENVIRONMENT}-alb"
           ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${ALB_NAME}" \
             --region $AWS_REGION \
-            --query "LoadBalancers[?contains(LoadBalancerName, '${ENVIRONMENT}')].DNSName" \
+            --query "LoadBalancers[0].DNSName" \
             --output text)
           sleep 30
           curl -f http://${ALB_DNS}/api/health || exit 1
