@@ -21,7 +21,11 @@ A Next.js 14 frontend + FastAPI backend deployed to **AWS** and **Azure** with f
 | Prod | https://devops-assign-prod-fe.icyplant-0fc40f5f.centralindia.azurecontainerapps.io |
 
 ---
+## Documentation & Demo
 
+- 📄 [Architecture Documentation (Google Doc)](https://drive.google.com/drive/folders/1uV29K3l71cTPShtDohmasYhEOe2wc2UK)
+- 🎥 [Demo Video](https://drive.google.com/drive/folders/1uV29K3l71cTPShtDohmasYhEOe2wc2UK)
+- 🖼️ [Architecture Diagrams](https://drive.google.com/drive/folders/1uV29K3l71cTPShtDohmasYhEOe2wc2UK)
 ## Architecture
 
 ### AWS — ECS Fargate + ALB
