@@ -1,0 +1,95 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - main
+
+env:
+  RESOURCE_GROUP: devops-assignment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment based on branch
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+            echo "ACR_NAME=devopsassignmentprodacr" >> $GITHUB_ENV
+          elif [ "${{ github.ref_name }}" == "staging" ]; then
+            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
+            echo "ACR_NAME=devopsassignmentstagingacr" >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+            echo "ACR_NAME=devopsassignmentdevacr" >> $GITHUB_ENV
+          fi
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name $ACR_NAME
+
+      - name: Get backend URL for frontend build
+        run: |
+          BACKEND_FQDN=$(az containerapp show \
+            --name devops-assign-$ENVIRONMENT-be \
+            --resource-group $RESOURCE_GROUP \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "BACKEND_URL=https://$BACKEND_FQDN" >> $GITHUB_ENV
+          echo "Backend URL: $BACKEND_FQDN"
+
+      - name: Build and push backend
+        run: |
+          ACR_SERVER=$ACR_NAME.azurecr.io
+          docker build --platform linux/amd64 \
+            -t $ACR_SERVER/backend:${{ github.sha }} \
+            -t $ACR_SERVER/backend:latest \
+            -f docker/backend/Dockerfile ./backend
+          docker push $ACR_SERVER/backend:${{ github.sha }}
+          docker push $ACR_SERVER/backend:latest
+
+      - name: Build and push frontend
+        run: |
+          ACR_SERVER=$ACR_NAME.azurecr.io
+          docker build --platform linux/amd64 \
+            --no-cache \
+            --build-arg NEXT_PUBLIC_API_URL=$BACKEND_URL \
+            -t $ACR_SERVER/frontend:${{ github.sha }} \
+            -t $ACR_SERVER/frontend:latest \
+            -f docker/frontend/Dockerfile ./frontend
+          docker push $ACR_SERVER/frontend:${{ github.sha }}
+          docker push $ACR_SERVER/frontend:latest
+
+      - name: Deploy backend to Container Apps
+        run: |
+          az containerapp update \
+            --name devops-assign-$ENVIRONMENT-be \
+            --resource-group $RESOURCE_GROUP \
+            --image $ACR_NAME.azurecr.io/backend:${{ github.sha }}
+
+      - name: Deploy frontend to Container Apps
+        run: |
+          az containerapp update \
+            --name devops-assign-$ENVIRONMENT-fe \
+            --resource-group $RESOURCE_GROUP \
+            --image $ACR_NAME.azurecr.io/frontend:${{ github.sha }}
+
+      - name: Health check
+        run: |
+          BACKEND_FQDN=$(az containerapp show \
+            --name devops-assign-$ENVIRONMENT-be \
+            --resource-group $RESOURCE_GROUP \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          sleep 30
+          curl -f https://$BACKEND_FQDN/api/health || exit 1
+          echo "Health check passed!"

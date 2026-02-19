@@ -1,0 +1,122 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - main
+
+env:
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: 380652644852
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment based on branch
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+          elif [ "${{ github.ref_name }}" == "staging" ]; then
+            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ALB URL for frontend build
+        run: |
+          ALB_NAME="devops-assignment-${ENVIRONMENT}-alb"
+          ALB_URL=$(aws elbv2 describe-load-balancers \
+            --names "${ALB_NAME}" \
+            --region $AWS_REGION \
+            --query "LoadBalancers[0].DNSName" \
+            --output text)
+          echo "ALB_URL=http://${ALB_URL}" >> $GITHUB_ENV
+          echo "ALB URL: ${ALB_URL}"
+
+      - name: Build and push backend
+        env:
+          ECR_BACKEND: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/devops-assignment-${{ env.ENVIRONMENT }}-backend
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            -t ${ECR_BACKEND}:${{ github.sha }} \
+            -t ${ECR_BACKEND}:latest \
+            -f docker/backend/Dockerfile \
+            ./backend
+          docker push ${ECR_BACKEND}:${{ github.sha }}
+          docker push ${ECR_BACKEND}:latest
+
+      - name: Build and push frontend
+        env:
+          ECR_FRONTEND: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/devops-assignment-${{ env.ENVIRONMENT }}-frontend
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --no-cache \
+            --build-arg NEXT_PUBLIC_API_URL=${{ env.ALB_URL }} \
+            -t ${ECR_FRONTEND}:${{ github.sha }} \
+            -t ${ECR_FRONTEND}:latest \
+            -f docker/frontend/Dockerfile \
+            ./frontend
+          docker push ${ECR_FRONTEND}:${{ github.sha }}
+          docker push ${ECR_FRONTEND}:latest
+
+      - name: Deploy backend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --service devops-assignment-${ENVIRONMENT}-backend \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      - name: Deploy frontend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --service devops-assignment-${ENVIRONMENT}-frontend \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      - name: Wait for backend to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --services devops-assignment-${ENVIRONMENT}-backend \
+            --region $AWS_REGION
+
+      - name: Wait for frontend to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --services devops-assignment-${ENVIRONMENT}-frontend \
+            --region $AWS_REGION
+
+      - name: Health check
+        run: |
+          ALB_NAME="devops-assignment-${ENVIRONMENT}-alb"
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${ALB_NAME}" \
+            --region $AWS_REGION \
+            --query "LoadBalancers[0].DNSName" \
+            --output text)
+          sleep 30
+          curl -f http://${ALB_DNS}/api/health || exit 1
+          echo "Health check passed!"
