@@ -37,7 +37,7 @@ export default function Home() {
       </Head>
 
       <main>
-        <h1>19-feb  DevOps Assignment</h1>
+        <h1>Zoom meet pre 19-feb  DevOps Assignment</h1>
         <div className="status">
           <p>Status: <span className={status.includes('connected') ? 'success' : 'error'}>{status}</span></p>
         </div>
