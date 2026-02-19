@@ -44,70 +44,75 @@ jobs:
         run: |
           ALB_URL=$(aws elbv2 describe-load-balancers \
             --region $AWS_REGION \
-            --query "LoadBalancers[?contains(LoadBalancerName, '$ENVIRONMENT')].DNSName" \
+            --query "LoadBalancers[?contains(LoadBalancerName, '${ENVIRONMENT}')].DNSName" \
             --output text)
-          echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
-          echo "ALB URL: $ALB_URL"
+          echo "ALB_URL=http://${ALB_URL}" >> $GITHUB_ENV
+          echo "ALB URL: ${ALB_URL}"
 
       - name: Build and push backend
+        env:
+          ECR_BACKEND: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/devops-assignment-${{ env.ENVIRONMENT }}-backend
         run: |
-          ECR_BACKEND=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/devops-assignment-$ENVIRONMENT-backend
-          docker build --platform linux/amd64 \
-            -t $ECR_BACKEND:${{ github.sha }} \
-            -t $ECR_BACKEND:latest \
-            -f docker/backend/Dockerfile ./backend
-          docker push $ECR_BACKEND:${{ github.sha }}
-          docker push $ECR_BACKEND:latest
-          echo "BACKEND_IMAGE=$ECR_BACKEND:${{ github.sha }}" >> $GITHUB_ENV
+          docker build \
+            --platform linux/amd64 \
+            -t ${ECR_BACKEND}:${{ github.sha }} \
+            -t ${ECR_BACKEND}:latest \
+            -f docker/backend/Dockerfile \
+            ./backend
+          docker push ${ECR_BACKEND}:${{ github.sha }}
+          docker push ${ECR_BACKEND}:latest
 
       - name: Build and push frontend
+        env:
+          ECR_FRONTEND: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/devops-assignment-${{ env.ENVIRONMENT }}-frontend
         run: |
-          ECR_FRONTEND=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/devops-assignment-$ENVIRONMENT-frontend
-          docker build --platform linux/amd64 \
-            --build-arg NEXT_PUBLIC_API_URL=$ALB_URL \
-            -t $ECR_FRONTEND:${{ github.sha }} \
-            -t $ECR_FRONTEND:latest \
-            -f docker/frontend/Dockerfile ./frontend
-          docker push $ECR_FRONTEND:${{ github.sha }}
-          docker push $ECR_FRONTEND:latest
-          echo "FRONTEND_IMAGE=$ECR_FRONTEND:${{ github.sha }}" >> $GITHUB_ENV
+          docker build \
+            --platform linux/amd64 \
+            --no-cache \
+            --build-arg NEXT_PUBLIC_API_URL=${{ env.ALB_URL }} \
+            -t ${ECR_FRONTEND}:${{ github.sha }} \
+            -t ${ECR_FRONTEND}:latest \
+            -f docker/frontend/Dockerfile \
+            ./frontend
+          docker push ${ECR_FRONTEND}:${{ github.sha }}
+          docker push ${ECR_FRONTEND}:latest
 
       - name: Deploy backend to ECS
         run: |
           aws ecs update-service \
-            --cluster devops-assignment-$ENVIRONMENT \
-            --service devops-assignment-$ENVIRONMENT-backend \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --service devops-assignment-${ENVIRONMENT}-backend \
             --force-new-deployment \
             --region $AWS_REGION
 
       - name: Deploy frontend to ECS
         run: |
           aws ecs update-service \
-            --cluster devops-assignment-$ENVIRONMENT \
-            --service devops-assignment-$ENVIRONMENT-frontend \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --service devops-assignment-${ENVIRONMENT}-frontend \
             --force-new-deployment \
             --region $AWS_REGION
 
       - name: Wait for backend to stabilize
         run: |
           aws ecs wait services-stable \
-            --cluster devops-assignment-$ENVIRONMENT \
-            --services devops-assignment-$ENVIRONMENT-backend \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --services devops-assignment-${ENVIRONMENT}-backend \
             --region $AWS_REGION
 
       - name: Wait for frontend to stabilize
         run: |
           aws ecs wait services-stable \
-            --cluster devops-assignment-$ENVIRONMENT \
-            --services devops-assignment-$ENVIRONMENT-frontend \
+            --cluster devops-assignment-${ENVIRONMENT} \
+            --services devops-assignment-${ENVIRONMENT}-frontend \
             --region $AWS_REGION
 
       - name: Health check
         run: |
           ALB_DNS=$(aws elbv2 describe-load-balancers \
             --region $AWS_REGION \
-            --query "LoadBalancers[?contains(LoadBalancerName, '$ENVIRONMENT')].DNSName" \
+            --query "LoadBalancers[?contains(LoadBalancerName, '${ENVIRONMENT}')].DNSName" \
             --output text)
           sleep 30
-          curl -f http://$ALB_DNS/api/health || exit 1
+          curl -f http://${ALB_DNS}/api/health || exit 1
           echo "Health check passed!"
